@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuthStore, useProductStore, useScoringStore, calculateProductSummary } from '@/store/useStore';
 import { formatCurrency, getScoreColor, getScoreLabel } from '@/lib/utils';
 import Link from 'next/link';
+import PricingPlanGenerator from '@/components/product/PricingPlanGenerator';
 import {
   ArrowLeft,
   Package,
@@ -296,6 +297,15 @@ export default function ProductDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Pricing Plan Generator */}
+      <PricingPlanGenerator 
+        costPrice={product.cost_price} 
+        onSave={(plans) => {
+          console.log('Saved pricing plans:', plans);
+          // Optional: Save to product or show notification
+        }}
+      />
 
       {/* Product Description */}
       {product.description && (
