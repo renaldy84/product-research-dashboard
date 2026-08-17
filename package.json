@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "PORT=3021 next dev --webpack",
+    "build": "PORT=3021 next build --webpack",
+    "start": "PORT=3021 next start",
+    "lint": "eslint",
+    "import:anekadropship": "npx tsx scripts/import-anekadropship.ts",
+    "clean:descriptions": "npx tsx scripts/clean-product-descriptions.ts"
   },
   "dependencies": {
     "@types/better-sqlite3": "^9.6.0",
