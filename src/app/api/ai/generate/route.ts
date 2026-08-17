@@ -5,7 +5,7 @@ import { runQuery } from '@/lib/db';
 type AIProvider = 'openai' | 'openrouter' | 'sumopod';
 
 interface GenerateRequest {
-  type: 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'description' | 'target_market' | 'problem_solved' | 'competitors' | 'demand_indication' | 'pricing';
+  type: 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'description' | 'target_market' | 'problem_solved' | 'competitors' | 'demand_indication' | 'pricing' | 'scoring';
   product: {
     name: string;
     description?: string;
@@ -562,6 +562,105 @@ Untuk produk "${product.name}":
 
 Gunakan data spesifik dari web browsing. Format output dalam markdown.`;
 
+        break;
+
+      case 'scoring':
+        prompt = `Analisis produk berikut dan berikan skor EMPIRIS untuk 3 dimensi:
+
+**PRODUK:**
+- Nama: ${product.name}
+- Deskripsi: ${product.description || 'Belum ada deskripsi'}
+- Harga Modal: ${formatCurrency(product.cost_price)}
+- Harga Jual: ${formatCurrency(product.selling_price)}
+
+**AI OPINION:**
+${product.ai_opinion || 'Belum ada'}
+
+**TARGET MARKET:**
+${product.target_market || 'Belum ada'}
+
+**DEMAND ANALYSIS:**
+${product.demand_indication || 'Belum ada'}
+
+**ANALISIS KOMPETITOR:**
+${product.competitors || 'Belum ada'}
+
+**MASALAH YANG DISELESAIKAN:**
+${product.problem_solved || 'Belum ada'}
+
+**POTENTIAL ANGLES:**
+${product.potential_angles || 'Belum ada'}
+
+---
+
+HITUNG SKOR BERIKUT INI:
+
+**1. MARKET POTENTIAL (0-100):**
+Berdasarkan:
+- AI Opinion tentang kelayakan produk
+- Demand analysis (tren pasar, volume pencarian)
+- Target market yang jelas
+- Problem yang diselesaikan (seberapa urgent)
+
+Skor:
+- 0-20: Pasar kecil, demand rendah, competition tinggi
+- 21-40: Pasar moderate, demand stabil tapi competition kuat
+- 41-60: Pasar cukup besar, demand baik, competition manageable
+- 61-80: Pasar besar, demand tinggi, competition ada tapi bisa diungguli
+- 81-100: Pasar sangat besar, demand sangat tinggi, opportunity besar
+
+**2. COMPETITION LEVEL (0-100):**
+Berdasarkan analisis kompetitor:
+- Berapa banyak kompetitor?
+- Berapa range harga mereka?
+- Kelebihan dan kekurangan mereka?
+- Apakah ada celah di pasar?
+
+Skor:
+- 0-20: Sangat sedikit kompetitor, mudah masuk pasar
+- 21-40: Sedikit kompetitor, ada space untuk produk baru
+- 41-60: Competition moderate, perlu differentiate
+- 61-80: Banyak kompetitor, price war possible
+- 81-100: Pasar saturated, sangat sulit bersaing
+
+**3. UNIQUENESS (0-100, skala 1-10 dikali 10):**
+Analisis KEUNIKAN produk berdasarkan:
+- Deskripsi produk
+- Problem yang diselesaikan
+- Potential angles
+- Perbandingan dengan kompetitor
+
+Rumus:
+- 1 hal unik = 20 poin
+- 2 hal unik = 40 poin
+- 3 hal unik = 60 poin
+- 4 hal unik = 80 poin
+- 5+ hal unik = 100 poin
+
+Contoh analisis keunikan:
+- Bahan/material unik?
+- Formula/teknologi khusus?
+- Manfaat yang tidak ada di kompetitor?
+- Packaging yang berbeda?
+- Target market yang berbeda?
+- Price point yang unik?
+- Brand story yang compelling?
+
+---
+
+RESPON DALAM FORMAT JSON (tanpa markdown):
+{
+  "market_potential": [skor 0-100],
+  "competition_level": [skor 0-100],
+  "uniqueness": [skor 0-100],
+  "reasoning": {
+    "market_potential": "penjelasan singkat kenapa dapat skor ini",
+    "competition_level": "penjelasan singkat kenapa dapat skor ini",
+    "uniqueness": "penjelasan + daftar hal-hal unik yang ditemukan"
+  }
+}
+
+PENTING: JSON valid tanpa markdown. Skor harus EMPIRIS berdasarkan data di atas.`;
         break;
 
       case 'pricing':

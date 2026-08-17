@@ -8,7 +8,8 @@
     "start": "PORT=3021 next start",
     "lint": "eslint",
     "import:anekadropship": "npx tsx scripts/import-anekadropship.ts",
-    "clean:descriptions": "npx tsx scripts/clean-product-descriptions.ts"
+    "clean:descriptions": "npx tsx scripts/clean-product-descriptions.ts",
+    "fix:scores": "npx tsx scripts/fix-scores.ts"
   },
   "dependencies": {
     "@types/better-sqlite3": "^9.6.0",

@@ -72,6 +72,7 @@ export default function ProductDetailPage() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [generatingTypes, setGeneratingTypes] = useState<Set<GenerateType>>(new Set());
+  const [isRecalculatingScores, setIsRecalculatingScores] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [expandedSections] = useState<Record<string, boolean>>({
     opinion: true,
@@ -214,7 +215,7 @@ export default function ProductDetailPage() {
     }
   };
 
-  // Generate all AI content at once with real-time widget updates
+  // Generate all AI content at once with real-time updates
   const handleGenerateAll = async () => {
     if (!user || !product) return;
 
@@ -235,8 +236,8 @@ export default function ProductDetailPage() {
       tiktok: 'tiktok_narrative',
     };
 
-    const results: Record<string, string> = {};
     let errorCount = 0;
+    const localProduct = { ...product }; // Local copy to track results
 
     try {
       // Get available providers
@@ -252,6 +253,7 @@ export default function ProductDetailPage() {
         const type = allGenerateTypes[i];
         const config = generateConfig.find(c => c.type === type);
         const label = config?.label || type;
+        const field = fieldMap[type];
         
         console.log(`[AI Generate ${i + 1}/${allGenerateTypes.length}] Starting: ${label}`);
         
@@ -270,10 +272,10 @@ export default function ProductDetailPage() {
                 name: product.name,
                 cost_price: product.cost_price,
                 selling_price: product.selling_price,
-                target_market: product.target_market || '',
-                problem_solved: product.problem_solved || '',
-                competitors: product.competitors || '',
-                potential_angles: product.potential_angles || '',
+                target_market: localProduct.target_market || '',
+                problem_solved: localProduct.problem_solved || '',
+                competitors: localProduct.competitors || '',
+                potential_angles: localProduct.potential_angles || '',
               }
             }),
           });
@@ -283,19 +285,29 @@ export default function ProductDetailPage() {
           }
 
           const data = await response.json();
-          const field = fieldMap[type];
           
           if (field && data.result) {
-            results[type] = data.result;
+            // Update local copy
+            (localProduct as any)[field] = data.result;
             
-            // Immediately update the store with this result
-            const updatedProduct = { ...product, [field]: data.result };
+            // Update store immediately with single field
+            const updatedProduct = { ...localProduct };
             updateProduct(updatedProduct);
+            
+            // Save to DB immediately - only this field
+            await fetch(`/api/products/${productId}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': user.id
+              },
+              body: JSON.stringify({ [field]: data.result }),
+            });
+            
+            console.log(`[AI Generate ${i + 1}/${allGenerateTypes.length}] ✓ Done: ${label} (saved)`);
           }
           
-          console.log(`[AI Generate ${i + 1}/${allGenerateTypes.length}] ✓ Done: ${label}`);
-          
-          // Remove this type from generating set (widget is done)
+          // Remove this type from generating set
           setGeneratingTypes(prev => {
             const next = new Set(prev);
             next.delete(type);
@@ -305,7 +317,6 @@ export default function ProductDetailPage() {
         } catch (error) {
           console.error(`[AI Generate ${i + 1}/${allGenerateTypes.length}] ✗ Failed: ${label}`, error);
           errorCount++;
-          // Still remove from generating set even if failed
           setGeneratingTypes(prev => {
             const next = new Set(prev);
             next.delete(type);
@@ -314,33 +325,101 @@ export default function ProductDetailPage() {
         }
       }
 
-      // Final save to database with all results
-      if (Object.keys(results).length > 0) {
-        const updateData: any = { ...results };
-        for (const [type, content] of Object.entries(results)) {
-          const field = fieldMap[type];
-          if (field) {
-            updateData[field] = content;
+      // Calculate AI-powered scores after all content is generated
+      if (errorCount < allGenerateTypes.length) {
+        console.log('[AI Scoring] Starting AI-powered scoring...');
+        
+        try {
+          // Call AI to calculate scores based on generated content
+          const scoringRes = await fetch('/api/ai/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': user.id
+            },
+            body: JSON.stringify({
+              type: 'scoring',
+              provider: activeProvider?.id || 'openai',
+              model: activeProvider?.defaultModel,
+              product: {
+                name: localProduct.name,
+                cost_price: localProduct.cost_price,
+                selling_price: localProduct.selling_price,
+                description: localProduct.description || '',
+                target_market: localProduct.target_market || '',
+                problem_solved: localProduct.problem_solved || '',
+                demand_indication: localProduct.demand_indication || '',
+                competitors: localProduct.competitors || '',
+                potential_angles: localProduct.potential_angles || '',
+                ai_opinion: localProduct.ai_opinion || '',
+              }
+            }),
+          });
+
+          if (scoringRes.ok) {
+            const scoringData = await scoringRes.json();
+            
+            // Parse scoring JSON from AI response
+            if (scoringData.result) {
+              try {
+                let cleanResult = scoringData.result.trim();
+                if (cleanResult.includes('```json')) {
+                  cleanResult = cleanResult.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
+                } else if (cleanResult.includes('```')) {
+                  cleanResult = cleanResult.replace(/```\n?/g, '').replace(/```\n?$/g, '');
+                }
+                
+                const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  const scores = JSON.parse(jsonMatch[0]);
+                  
+                  // Calculate profit margin score
+                  const profit = localProduct.selling_price - localProduct.cost_price;
+                  const margin = localProduct.cost_price > 0 ? (profit / localProduct.cost_price) * 100 : 0;
+                  const profitMarginScore = Math.min(100, Math.max(0, margin * 2));
+                  
+                  // Overall score = weighted average
+                  const overall = Math.round(
+                    scores.market_potential * weights.market_potential +
+                    scores.competition_level * weights.competition_level +
+                    profitMarginScore * weights.profit_margin +
+                    scores.uniqueness * weights.uniqueness
+                  );
+                  
+                  const finalScores = {
+                    profit_margin: Math.round(profitMarginScore),
+                    market_potential: Math.round(scores.market_potential),
+                    competition_level: Math.round(scores.competition_level),
+                    uniqueness: Math.round(scores.uniqueness),
+                    overall_score: Math.min(100, Math.max(0, overall)),
+                  };
+                  
+                  console.log('[AI Scoring] ✓ Scores calculated:', finalScores);
+                  
+                  // Update store and save
+                  updateProduct({ ...localProduct, scores: finalScores });
+                  
+                  await fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-user-id': user.id
+                    },
+                    body: JSON.stringify({ scores: finalScores }),
+                  });
+                  
+                  console.log('[AI Scoring] ✓ Scores saved to DB');
+                }
+              } catch (parseError) {
+                console.error('[AI Scoring] Parse error:', parseError);
+              }
+            }
           }
+        } catch (scoreError) {
+          console.error('[AI Scoring] Failed:', scoreError);
         }
-
-        // Recalculate scores
-        const category = categories.find(c => c.id === product.category_id);
-        const summary = calculateProductSummary({ ...product, ...updateData } as any, category, weights);
-        updateData.scores = summary.scores;
-
-        // Save to database
-        await fetch(`/api/products/${productId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': user.id
-          },
-          body: JSON.stringify(updateData),
-        });
       }
 
-      // Show result notification
       if (errorCount > 0) {
         const successCount = allGenerateTypes.length - errorCount;
         alert(`Generate selesai! ${successCount} berhasil, ${errorCount} gagal.`);
@@ -349,6 +428,123 @@ export default function ProductDetailPage() {
     } catch (error) {
       console.error('Failed to generate all content:', error);
       alert('Gagal menghasilkan konten. Silakan coba lagi.');
+    }
+  };
+
+  // Recalculate scores using AI
+  const handleRecalculateScores = async () => {
+    if (!user || !product) return;
+    if (!product.ai_opinion) {
+      alert('Generate AI Opinion terlebih dahulu untuk menghitung scores.');
+      return;
+    }
+
+    setIsRecalculatingScores(true);
+    console.log('[AI Recalc] Starting score recalculation...');
+
+    try {
+      // Get available providers
+      const providersRes = await fetch('/api/ai/generate', {
+        method: 'GET',
+        headers: { 'x-user-id': user.id }
+      });
+      const providersData = await providersRes.json();
+      const activeProvider = providersData.providers?.find((p: any) => p.hasApiKey);
+
+      // Call AI to calculate scores
+      const scoringRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id
+        },
+        body: JSON.stringify({
+          type: 'scoring',
+          provider: activeProvider?.id || 'openai',
+          model: activeProvider?.defaultModel,
+          product: {
+            name: product.name,
+            cost_price: product.cost_price,
+            selling_price: product.selling_price,
+            description: product.description || '',
+            target_market: product.target_market || '',
+            problem_solved: product.problem_solved || '',
+            demand_indication: product.demand_indication || '',
+            competitors: product.competitors || '',
+            potential_angles: product.potential_angles || '',
+            ai_opinion: product.ai_opinion || '',
+          }
+        }),
+      });
+
+      if (!scoringRes.ok) {
+        throw new Error('Failed to calculate scores');
+      }
+
+      const scoringData = await scoringRes.json();
+
+      if (scoringData.result) {
+        try {
+          let cleanResult = scoringData.result.trim();
+          if (cleanResult.includes('```json')) {
+            cleanResult = cleanResult.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
+          } else if (cleanResult.includes('```')) {
+            cleanResult = cleanResult.replace(/```\n?/g, '').replace(/```\n?$/g, '');
+          }
+
+          const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const scores = JSON.parse(jsonMatch[0]);
+
+            // Calculate profit margin score
+            const profit = product.selling_price - product.cost_price;
+            const margin = product.cost_price > 0 ? (profit / product.cost_price) * 100 : 0;
+            const profitMarginScore = Math.min(100, Math.max(0, margin * 2));
+
+            // Overall score = weighted average of all scores (each 0-100, weights sum to 1)
+            const overall = Math.round(
+              scores.market_potential * weights.market_potential +
+              scores.competition_level * weights.competition_level +
+              profitMarginScore * weights.profit_margin +
+              scores.uniqueness * weights.uniqueness
+            );
+
+            const finalScores = {
+              profit_margin: Math.round(profitMarginScore),
+              market_potential: Math.round(scores.market_potential),
+              competition_level: Math.round(scores.competition_level),
+              uniqueness: Math.round(scores.uniqueness),
+              overall_score: Math.min(100, Math.max(0, overall)),
+            };
+
+            console.log('[AI Recalc] ✓ Scores calculated:', finalScores);
+            console.log('[AI Recalc] Reasoning:', scores.reasoning);
+
+            // Update store and save to DB
+            updateProduct({ ...product, scores: finalScores });
+
+            await fetch(`/api/products/${productId}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': user.id
+              },
+              body: JSON.stringify({ scores: finalScores }),
+            });
+
+            console.log('[AI Recalc] ✓ Scores saved to DB');
+            alert('Scores berhasil dihitung ulang!');
+          }
+        } catch (parseError) {
+          console.error('[AI Recalc] Parse error:', parseError);
+          alert('Gagal parse response dari AI.');
+        }
+      }
+    } catch (error) {
+      console.error('[AI Recalc] Error:', error);
+      alert('Gagal menghitung scores. Silakan coba lagi.');
+    } finally {
+      setIsRecalculatingScores(false);
     }
   };
 
@@ -397,7 +593,10 @@ export default function ProductDetailPage() {
   const category = categories.find(c => c.id === product.category_id);
   const profit = product.selling_price - product.cost_price;
   const margin = product.cost_price > 0 ? (profit / product.cost_price) * 100 : 0;
-  const summary = calculateProductSummary(product, category, weights);
+  
+  // Use product.scores if available (from AI), otherwise calculate
+  const scores = product.scores || calculateProductSummary(product, category, weights).scores;
+  const summary = { scores, product, category, profit, profit_margin_pct: margin };
 
   return (
     <div className="space-y-6">
@@ -501,7 +700,26 @@ export default function ProductDetailPage() {
 
       {/* Score Breakdown */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-        <h2 className="font-semibold text-gray-900 mb-4">Score Breakdown</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-900">Score Breakdown</h2>
+          <button
+            onClick={handleRecalculateScores}
+            disabled={isRecalculatingScores || !product.ai_opinion}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {isRecalculatingScores ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Calculating...
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} />
+                Recalculate with AI
+              </>
+            )}
+          </button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Profit Margin', score: summary.scores.profit_margin, weight: weights.profit_margin },

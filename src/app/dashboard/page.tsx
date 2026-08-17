@@ -63,7 +63,19 @@ export default function DashboardPage() {
     return products
       .map(product => {
         const category = categories.find(c => c.id === product.category_id);
-        return calculateProductSummary(product, category, weights);
+        const profit = product.selling_price - product.cost_price;
+        const profit_margin_pct = product.cost_price > 0 ? (profit / product.cost_price) * 100 : 0;
+        
+        // Use product.scores if available (from AI), otherwise calculate
+        const scores = product.scores || calculateProductSummary(product, category, weights).scores;
+        
+        return {
+          product,
+          category,
+          scores,
+          profit,
+          profit_margin_pct,
+        };
       })
       .sort((a, b) => b.scores.overall_score - a.scores.overall_score);
   }, [products, categories, weights]);
