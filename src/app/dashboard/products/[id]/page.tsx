@@ -7,6 +7,8 @@ import { useAuthStore, useProductStore, useScoringStore, calculateProductSummary
 import { formatCurrency, getScoreColor, getScoreLabel } from '@/lib/utils';
 import Link from 'next/link';
 import PricingPlanGenerator from '@/components/product/PricingPlanGenerator';
+import ProposalPDF from '@/components/product/ProposalPDF';
+import { pdf } from '@react-pdf/renderer';
 import {
   ArrowLeft,
   Package,
@@ -27,7 +29,10 @@ import {
   Share2,
   TrendingUp,
   Loader2,
-  LightbulbIcon
+  LightbulbIcon,
+  FileText,
+  Download,
+  LayoutGrid
 } from 'lucide-react';
 
 type GenerateType = 'target_market' | 'problem_solved' | 'demand_indication' | 'competitors' | 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'all';
@@ -82,6 +87,8 @@ export default function ProductDetailPage() {
     ig_reels: true,
     tiktok: true,
   });
+  const [viewMode, setViewMode] = useState<'analysis' | 'proposal'>('analysis');
+  const [isExporting, setIsExporting] = useState(false);
 
   const product = products.find(p => p.id === productId);
   if (product) {
@@ -558,6 +565,28 @@ export default function ProductDetailPage() {
     }
   };
 
+  const handleExportPDF = async () => {
+    setIsExporting(true);
+    
+    try {
+      const doc = <ProposalPDF product={product} category={category} margin={margin} summary={summary} />;
+      const blob = await pdf(doc).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${product?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'proposal'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('PDF Error:', err);
+      alert('Gagal export PDF');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
 
   // Helper to render markdown content safely
   const renderMarkdown = (text: string | null | undefined) => {
@@ -601,7 +630,7 @@ export default function ProductDetailPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
           <Link
             href="/dashboard/products"
@@ -618,16 +647,37 @@ export default function ProductDetailPage() {
                 </span>
               )}
             </div>
-            <p className="text-gray-600 mt-1">Detail produk dan analisis AI</p>
+            <p className="text-gray-500 text-sm mt-1">Detail produk dan analisis AI</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('analysis')}
+              className={`px-3 py-1.5 rounded text-sm font-medium ${viewMode === 'analysis' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+            >
+              <LayoutGrid size={14} className="inline mr-1.5" />Analysis
+            </button>
+            <button
+              onClick={() => setViewMode('proposal')}
+              className={`px-3 py-1.5 rounded text-sm font-medium ${viewMode === 'proposal' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+            >
+              <FileText size={14} className="inline mr-1.5" />Proposal
+            </button>
+          </div>
+          <button
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            PDF
+          </button>
           <Link
             href={`/dashboard/products/${productId}/edit`}
-            className="flex items-center gap-2 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
           >
-            <Edit size={18} />
-            Edit
+            <Edit size={14} />Edit
           </Link>
         </div>
       </div>
@@ -658,6 +708,9 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
+      {/* Analysis View */}
+      {viewMode === 'analysis' && (
+      <>
       {/* Pricing Plan Generator */}
       <PricingPlanGenerator 
         costPrice={product.cost_price}
@@ -693,7 +746,7 @@ export default function ProductDetailPage() {
             <h2 className="font-semibold text-gray-900">Deskripsi Produk</h2>
           </div>
           <div className="max-h-64 overflow-y-auto text-sm text-gray-700">
-            <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(product.description) }} />
+            <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(product.description) as string }} />
           </div>
         </div>
       )}
@@ -851,7 +904,7 @@ export default function ProductDetailPage() {
                   {hasContent ? (
                     <div className="relative">
                       <div className="max-h-96 overflow-y-auto text-sm text-gray-700 mb-3 px-2 py-2 bg-gray-50 rounded-lg">
-                        <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(content) }} />
+                        <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(content) as string }} />
                       </div>
                       <button
                         onClick={() => copyToClipboard(content, item.type)}
@@ -894,6 +947,100 @@ export default function ProductDetailPage() {
           })}
         </div>
       </div>
+      </>
+      )}
+
+      {/* Proposal View */}
+      {viewMode === 'proposal' && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
+            <h1 className="text-2xl font-bold">{product.name}</h1>
+            <p className="text-indigo-100 mt-1">{category?.name || 'Business Proposal'}</p>
+          </div>
+          <div className="p-6 border-b border-gray-200">
+            <div className="grid grid-cols-4 gap-4 text-center">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Harga Modal</p>
+                <p className="font-bold text-gray-900">{formatCurrency(product.cost_price)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Harga Jual</p>
+                <p className="font-bold text-gray-900">{formatCurrency(product.selling_price)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Margin</p>
+                <p className={`font-bold ${margin >= 30 ? 'text-green-600' : margin >= 15 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {margin.toFixed(1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Overall Score</p>
+                <p className="font-bold text-lg">{summary.scores.overall_score}</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-6 border-b border-gray-200">
+            <h3 className="font-semibold text-gray-900 mb-4">Score Breakdown</h3>
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: 'Profit Margin', score: summary.scores.profit_margin },
+                { label: 'Market Potential', score: summary.scores.market_potential },
+                { label: 'Competition', score: summary.scores.competition_level },
+                { label: 'Uniqueness', score: summary.scores.uniqueness },
+              ].map(item => (
+                <div key={item.label} className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-gray-900">{item.score}</p>
+                  <p className="text-xs text-gray-600 mt-1">{item.label}</p>
+                  <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${item.score >= 70 ? 'bg-green-500' : item.score >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${item.score}%` }}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {product.ai_opinion && (
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900 mb-3">AI Opinion</h3>
+              <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(product.ai_opinion) as string }} />
+            </div>
+          )}
+          {product.marketing_strategy && (
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900 mb-3">Marketing Strategy</h3>
+              <div className="markdown-content" dangerouslySetInnerHTML={{ __html: marked.parse(product.marketing_strategy) as string }} />
+            </div>
+          )}
+          <div className="p-6">
+            <h3 className="font-semibold text-gray-900 mb-3">Recommendations</h3>
+            <div className="space-y-2">
+              {summary.scores.overall_score >= 70 && (
+                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                  Produk ini memiliki potensi tinggi untuk dilaunch
+                </div>
+              )}
+              {margin < 20 && (
+                <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0"></span>
+                  Margin rendah, perlu negosiasi harga supplier
+                </div>
+              )}
+              {summary.scores.market_potential >= 70 && (
+                <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
+                  Market potential tinggi
+                </div>
+              )}
+              {summary.scores.uniqueness >= 70 && (
+                <div className="flex items-center gap-2 text-sm text-purple-700 bg-purple-50 rounded-lg px-3 py-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                  Uniqueness tinggi - differentiator jelas
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Info */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">

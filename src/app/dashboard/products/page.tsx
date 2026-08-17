@@ -25,6 +25,7 @@ export default function ProductsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<string>('overall-desc');
 
   useEffect(() => {
     fetchData();
@@ -73,6 +74,33 @@ export default function ProductsPage() {
     return matchesSearch && matchesCategory;
   });
 
+  // Sort products
+  const sortedProducts = [...filteredProducts].sort((a, b) => {
+    const catA = categories.find(c => c.id === a.category_id);
+    const catB = categories.find(c => c.id === b.category_id);
+    const scoresA = a.scores || calculateProductSummary(a, catA, weights).scores;
+    const scoresB = b.scores || calculateProductSummary(b, catB, weights).scores;
+    
+    const [field, order] = sortBy.split('-');
+    let valueA: number, valueB: number;
+    
+    if (field === 'overall') {
+      valueA = scoresA.overall_score;
+      valueB = scoresB.overall_score;
+    } else if (field === 'competition') {
+      valueA = scoresA.competition_level;
+      valueB = scoresB.competition_level;
+    } else if (field === 'uniqueness') {
+      valueA = scoresA.uniqueness;
+      valueB = scoresB.uniqueness;
+    } else {
+      valueA = scoresA.profit_margin;
+      valueB = scoresB.profit_margin;
+    }
+    
+    return order === 'asc' ? valueA - valueB : valueB - valueA;
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -111,17 +139,33 @@ export default function ProductsPage() {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
-          <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+          <div className="flex gap-3">
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full sm:w-48 pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 appearance-none bg-white"
+              >
+                <option value="all">Semua Kategori</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
             <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full sm:w-48 pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 appearance-none bg-white"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
             >
-              <option value="all">Semua Kategori</option>
-              {categories.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
+              <option value="overall-desc">Overall ↓</option>
+              <option value="overall-asc">Overall ↑</option>
+              <option value="competition-desc">Kompetisi ↓</option>
+              <option value="competition-asc">Kompetisi ↑</option>
+              <option value="uniqueness-desc">Keunikan ↓</option>
+              <option value="uniqueness-asc">Keunikan ↑</option>
+              <option value="profit-desc">Profit Margin ↓</option>
+              <option value="profit-asc">Profit Margin ↑</option>
             </select>
           </div>
         </div>
@@ -153,10 +197,11 @@ export default function ProductsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredProducts.map((product) => {
+          {sortedProducts.map((product) => {
             const category = categories.find(c => c.id === product.category_id);
             const profit = product.selling_price - product.cost_price;
             const margin = product.cost_price > 0 ? (profit / product.cost_price) * 100 : 0;
+            const scores = product.scores || calculateProductSummary(product, category, weights).scores;
 
             return (
               <div
@@ -223,19 +268,42 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {(() => {
-                  const scores = product.scores || calculateProductSummary(product, category, weights).scores;
-                  return (
-                    <div className="pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-gray-500">Overall Score</span>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getScoreColor(scores.overall_score)}`}>
-                          {scores.overall_score} • {getScoreLabel(scores.overall_score)}
-                        </span>
-                      </div>
+                <div className="pt-4 border-t border-gray-100">
+                  {/* Overall Score */}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-gray-700">Overall</span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-sm font-medium ${getScoreColor(scores.overall_score)}`}>
+                      {scores.overall_score}
+                    </span>
+                  </div>
+                  {/* Score Breakdown Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded">
+                      <span className="text-xs text-gray-500">Profit</span>
+                      <span className={`text-xs font-medium ${scores.profit_margin >= 70 ? 'text-green-600' : scores.profit_margin >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {scores.profit_margin}
+                      </span>
                     </div>
-                  );
-                })()}
+                    <div className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded">
+                      <span className="text-xs text-gray-500">Market</span>
+                      <span className={`text-xs font-medium ${scores.market_potential >= 70 ? 'text-green-600' : scores.market_potential >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {scores.market_potential}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded">
+                      <span className="text-xs text-gray-500">Kompetisi</span>
+                      <span className={`text-xs font-medium ${scores.competition_level >= 70 ? 'text-green-600' : scores.competition_level >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {scores.competition_level}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded">
+                      <span className="text-xs text-gray-500">Unik</span>
+                      <span className={`text-xs font-medium ${scores.uniqueness >= 70 ? 'text-green-600' : scores.uniqueness >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {scores.uniqueness}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
                 <Link
                   href={`/dashboard/products/${product.id}`}
