@@ -28,6 +28,7 @@ export async function GET(
     return NextResponse.json({
       ...product,
       scores: product.scores_json ? JSON.parse(product.scores_json) : null,
+      pricing_plan: product.pricing_plan ? JSON.parse(product.pricing_plan) : null,
     });
   } catch (error) {
     console.error('Get product error:', error);
@@ -68,6 +69,7 @@ export async function PUT(
       meta_ad_narrative,
       ig_reels_narrative,
       tiktok_narrative,
+      pricing_plan,
       scores,
     } = body;
 
@@ -106,6 +108,7 @@ export async function PUT(
     if (meta_ad_narrative !== undefined) { updateFields.push('meta_ad_narrative = ?'); updateValues.push(meta_ad_narrative || null); }
     if (ig_reels_narrative !== undefined) { updateFields.push('ig_reels_narrative = ?'); updateValues.push(ig_reels_narrative || null); }
     if (tiktok_narrative !== undefined) { updateFields.push('tiktok_narrative = ?'); updateValues.push(tiktok_narrative || null); }
+    if (pricing_plan !== undefined) { updateFields.push('pricing_plan = ?'); updateValues.push(pricing_plan ? JSON.stringify(pricing_plan) : null); }
     
     // Scores - only update if provided
     if (scores !== undefined) { 
@@ -137,6 +140,7 @@ export async function PUT(
     return NextResponse.json({
       ...updatedProduct,
       scores: updatedProduct.scores_json ? JSON.parse(updatedProduct.scores_json) : null,
+      pricing_plan: updatedProduct.pricing_plan ? JSON.parse(updatedProduct.pricing_plan) : null,
     });
   } catch (error) {
     console.error('Update product error:', error);

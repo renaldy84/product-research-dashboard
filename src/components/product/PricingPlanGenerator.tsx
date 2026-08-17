@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { formatCurrency } from '@/lib/utils';
+import { useAuthStore } from '@/store/useStore';
 import { 
   Calculator, 
   TrendingUp, 
@@ -13,7 +14,10 @@ import {
   RefreshCw,
   Save,
   Copy,
-  Check
+  Check,
+  Loader2,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 interface PricingTier {
@@ -24,36 +28,98 @@ interface PricingTier {
   target: string;
 }
 
+interface ProductData {
+  name: string;
+  cost_price: number;
+  selling_price: number; // Supplier recommended selling price
+  target_market: string;
+  problem_solved: string;
+  demand_indication: string;
+  competitors: string;
+  potential_angles: string;
+  ai_opinion: string;
+  pitchline: string;
+  marketing_strategy: string;
+}
+
 interface PricingPlanGeneratorProps {
   costPrice: number;
+  productId?: string;
+  product?: ProductData;
+  existingPricingPlan?: PricingTier[];
   onSave?: (plans: PricingTier[]) => void;
 }
 
-const defaultPlans: PricingTier[] = [
-  { name: 'Trial', icon: '🎁', quantity: 1, sellingPrice: 55000, target: 'Akuisisi' },
-  { name: 'Hemat ⭐', icon: '⭐', quantity: 2, sellingPrice: 99000, target: 'AOV utama' },
-  { name: 'Rutin 🔥', icon: '🔥', quantity: 3, sellingPrice: 139000, target: 'AOV + LTV' },
-  { name: 'Peternak 🏆', icon: '🏆', quantity: 5, sellingPrice: 199000, target: 'Heavy user / stok' },
-];
+// Check if all required content is filled
+const checkRequiredContent = (product?: ProductData): boolean => {
+  if (!product) return false;
+  return !!(
+    product.target_market?.trim() &&
+    product.problem_solved?.trim() &&
+    product.demand_indication?.trim() &&
+    product.competitors?.trim() &&
+    product.potential_angles?.trim() &&
+    product.ai_opinion?.trim()
+  );
+};
 
-export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanGeneratorProps) {
-  const [plans, setPlans] = useState<PricingTier[]>(defaultPlans);
+// Get status of each required field
+const getFieldStatus = (product?: ProductData): Record<string, boolean> => {
+  if (!product) {
+    return {
+      target_market: false,
+      problem_solved: false,
+      demand_indication: false,
+      competitors: false,
+      potential_angles: false,
+      ai_opinion: false,
+    };
+  }
+  return {
+    target_market: !!product.target_market?.trim(),
+    problem_solved: !!product.problem_solved?.trim(),
+    demand_indication: !!product.demand_indication?.trim(),
+    competitors: !!product.competitors?.trim(),
+    potential_angles: !!product.potential_angles?.trim(),
+    ai_opinion: !!product.ai_opinion?.trim(),
+  };
+};
+
+export default function PricingPlanGenerator({ costPrice, productId, product, existingPricingPlan, onSave }: PricingPlanGeneratorProps) {
+  const { user } = useAuthStore();
+  const [plans, setPlans] = useState<PricingTier[]>([]);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [savedMessage, setSavedMessage] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [hasLoadedFromDb, setHasLoadedFromDb] = useState(false);
 
-  // Update selling prices when cost price changes
+  const hasRequiredContent = checkRequiredContent(product);
+  const fieldStatus = getFieldStatus(product);
+
+  // Default plans when no AI generation
+  const defaultPlans: PricingTier[] = [
+    { name: 'Trial', icon: '🎁', quantity: 1, sellingPrice: 0, target: 'Akuisisi' },
+    { name: 'Hemat ⭐', icon: '⭐', quantity: 2, sellingPrice: 0, target: 'AOV utama' },
+    { name: 'Rutin 🔥', icon: '🔥', quantity: 3, sellingPrice: 0, target: 'AOV + LTV' },
+    { name: 'Peternak 🏆', icon: '🏆', quantity: 5, sellingPrice: 0, target: 'Heavy user / stok' },
+  ];
+
+  // Initialize plans - first from DB, then fallback to calculated
   useEffect(() => {
-    if (!isEditing) {
-      // Auto-calculate selling prices based on default margins
-      const updatedPlans = defaultPlans.map(plan => ({
+    if (existingPricingPlan && existingPricingPlan.length > 0) {
+      setPlans(existingPricingPlan);
+      setHasLoadedFromDb(true);
+    } else if (plans.length === 0 && costPrice > 0) {
+      const initialPlans = defaultPlans.map(plan => ({
         ...plan,
         sellingPrice: calculateSellingPrice(costPrice, plan.quantity, plan.target),
       }));
-      setPlans(updatedPlans);
+      setPlans(initialPlans);
     }
-  }, [costPrice, isEditing]);
+  }, [costPrice, existingPricingPlan]);
 
   const calculateSellingPrice = (cost: number, qty: number, target: string): number => {
     if (cost <= 0) return 0;
@@ -67,14 +133,13 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
     };
     
     const multiplier = marginMultipliers[target] || 2.0;
-    return Math.round((cost * multiplier * qty) / 1000) * 1000; // Round to nearest 1000
+    return Math.round((cost * multiplier * qty) / 1000) * 1000;
   };
 
   const updatePlan = (index: number, field: keyof PricingTier, value: any) => {
     const updated = [...plans];
     updated[index] = { ...updated[index], [field]: value };
     
-    // Auto-calculate selling price if quantity changes
     if (field === 'quantity' || field === 'target') {
       updated[index].sellingPrice = calculateSellingPrice(
         costPrice, 
@@ -96,14 +161,13 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
   };
 
   const calculateLTV = () => {
-    // LTV calculation: sum of all plan revenues
     const totalRevenue = plans.reduce((sum, plan) => sum + plan.sellingPrice, 0);
     const totalCost = plans.reduce((sum, plan) => sum + (costPrice * plan.quantity), 0);
     return {
       totalRevenue,
       totalCost,
       ltv: totalRevenue - totalCost,
-      avgOrderValue: totalRevenue / plans.length,
+      avgOrderValue: plans.length > 0 ? totalRevenue / plans.length : 0,
     };
   };
 
@@ -126,6 +190,126 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
     setIsEditing(false);
   };
 
+  // Generate pricing plan using AI
+  const handleGenerateWithAI = async () => {
+    if (!product || !hasRequiredContent) return;
+
+    if (!user) {
+      setAiError('Anda harus login untuk menggunakan fitur ini.');
+      setIsGeneratingAI(false);
+      return;
+    }
+
+    setIsGeneratingAI(true);
+    setAiError(null);
+    console.log('[Pricing AI] Starting pricing plan generation...');
+
+    try {
+      // Get available providers first
+      const providersRes = await fetch('/api/ai/generate', {
+        method: 'GET',
+        headers: { 'x-user-id': user.id }
+      });
+      const providersData = await providersRes.json();
+      const activeProvider = providersData.providers?.find((p: any) => p.hasApiKey);
+
+      const response = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id,
+        },
+        body: JSON.stringify({
+          type: 'pricing',
+          provider: activeProvider?.id || 'openai',
+          model: activeProvider?.defaultModel,
+          product: {
+            name: product.name,
+            cost_price: product.cost_price,
+            selling_price: product.selling_price,
+            target_market: product.target_market,
+            problem_solved: product.problem_solved,
+            demand_indication: product.demand_indication,
+            competitors: product.competitors,
+            potential_angles: product.potential_angles,
+            ai_opinion: product.ai_opinion,
+            pitchline: product.pitchline,
+            marketing_strategy: product.marketing_strategy,
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to generate pricing plan');
+      }
+
+      const data = await response.json();
+      console.log('[Pricing AI] ✓ Generated pricing plan');
+
+      // Parse JSON from the result text
+      if (data.result) {
+        try {
+          // Clean up the response
+          let cleanResult = data.result.trim();
+          if (cleanResult.includes('```json')) {
+            cleanResult = cleanResult.replace(/```json\n?/g, '').replace(/```\n?$/g, '');
+          } else if (cleanResult.includes('```')) {
+            cleanResult = cleanResult.replace(/```\n?/g, '').replace(/```\n?$/g, '');
+          }
+
+          const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            const plansArray = parsed.plans || parsed;
+
+            if (Array.isArray(plansArray)) {
+              const parsedPlans: PricingTier[] = plansArray.map((plan: any) => ({
+                name: plan.name || 'Paket',
+                icon: plan.icon || '📦',
+                quantity: plan.quantity || 1,
+                sellingPrice: plan.sellingPrice || 0,
+                target: plan.target || 'Akuisisi',
+              }));
+              setPlans(parsedPlans);
+              
+              // Save to database
+              if (productId && user) {
+                try {
+                  const saveResponse = await fetch(`/api/products/${productId}`, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-user-id': user.id,
+                    },
+                    body: JSON.stringify({
+                      pricing_plan: parsedPlans,
+                    }),
+                  });
+                  
+                  if (saveResponse.ok) {
+                    console.log('[Pricing AI] ✓ Saved to database');
+                    onSave?.(parsedPlans);
+                  }
+                } catch (saveError) {
+                  console.error('[Pricing AI] Failed to save to database:', saveError);
+                }
+              }
+            }
+          }
+        } catch (parseError) {
+          console.error('[Pricing AI] Parse error:', parseError);
+          throw new Error('Gagal parse response dari AI');
+        }
+      }
+    } catch (error) {
+      console.error('[Pricing AI] ✗ Error:', error);
+      setAiError(error instanceof Error ? error.message : 'Gagal menghasilkan pricing plan. Silakan coba lagi.');
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
+
   const ltvMetrics = calculateLTV();
 
   return (
@@ -141,7 +325,11 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
           </div>
           <div className="text-left">
             <h3 className="font-semibold text-gray-900">Pricing Plan Generator</h3>
-            <p className="text-sm text-gray-500">LTV-focused pricing strategy</p>
+            <p className="text-sm text-gray-500">
+              {hasRequiredContent 
+                ? 'LTV-focused pricing strategy' 
+                : 'Generate semua konten AI terlebih dahulu untuk unlock'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -157,6 +345,93 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
       {/* Content */}
       {isExpanded && (
         <div className="p-4 space-y-4">
+          {/* Content Status Check */}
+          {!hasRequiredContent && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Lock className="text-amber-600 mt-0.5" size={20} />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-800 mb-2">
+                    🔒 AI Pricing Generator terkunci
+                  </p>
+                  <p className="text-xs text-amber-700 mb-3">
+                    Generate semua konten di bawah terlebih dahulu untuk unlock AI Pricing:
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {[
+                      { key: 'target_market', label: 'Target Market' },
+                      { key: 'problem_solved', label: 'Masalah' },
+                      { key: 'demand_indication', label: 'Demand' },
+                      { key: 'competitors', label: 'Kompetitor' },
+                      { key: 'potential_angles', label: 'Angle' },
+                      { key: 'ai_opinion', label: 'AI Opinion' },
+                    ].map(item => (
+                      <div 
+                        key={item.key}
+                        className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${
+                          fieldStatus[item.key] 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-amber-100 text-amber-700'
+                        }`}
+                      >
+                        {fieldStatus[item.key] ? (
+                          <Check size={12} />
+                        ) : (
+                          <div className="w-3 h-3 border border-amber-400 rounded-full" />
+                        )}
+                        {item.label}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AI Generate Button */}
+          {hasRequiredContent && (
+            <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-indigo-900 flex items-center gap-2">
+                  <Sparkles size={16} className="text-indigo-600" />
+                  AI Pricing Strategy
+                </p>
+                <p className="text-xs text-indigo-700 mt-1">
+                  {product?.selling_price && product.selling_price > 0 && (
+                    <span>Harga psikologis supplier: <strong>{formatCurrency(product.selling_price)}</strong></span>
+                  )}
+                  {!product?.selling_price && (
+                    <span>Analisis kompetitor & demand untuk pricing optimal</span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={handleGenerateWithAI}
+                disabled={isGeneratingAI}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 shadow-sm"
+              >
+                {isGeneratingAI ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    Generate with AI
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* AI Error */}
+          {aiError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm text-red-700">{aiError}</p>
+            </div>
+          )}
+
           {/* LTV Summary */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-blue-50 rounded-lg p-3">
@@ -195,107 +470,117 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
                   </tr>
                 </thead>
                 <tbody>
-                  {plans.map((plan, index) => {
-                    const metrics = calculateMetrics(plan);
-                    const isHighlighted = plan.name.includes('Rutin') || plan.name.includes('Hemat');
-                    
-                    return (
-                      <tr 
-                        key={index} 
-                        className={`border-t border-gray-100 ${isHighlighted ? 'bg-amber-50' : ''}`}
-                      >
-                        <td className="px-3 py-2 font-semibold text-gray-900">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={plan.name}
-                              onChange={(e) => updatePlan(index, 'name', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                            />
-                          ) : (
-                            <span className="flex items-center gap-1">
-                              {plan.name}
-                              {(plan.name.includes('AOV') || plan.name.includes('Hemat')) && (
-                                <TrendingUp size={14} className="text-amber-600" />
-                              )}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              min="1"
-                              value={plan.quantity}
-                              onChange={(e) => updatePlan(index, 'quantity', parseInt(e.target.value) || 1)}
-                              className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
-                            />
-                          ) : (
-                            <span className="font-medium">{plan.quantity} pcs</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-bold text-gray-900">
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              value={plan.sellingPrice}
-                              onChange={(e) => updatePlan(index, 'sellingPrice', parseInt(e.target.value) || 0)}
-                              className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right"
-                            />
-                          ) : (
-                            formatCurrency(plan.sellingPrice)
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right text-gray-600">
-                          {formatCurrency(metrics.pricePerPcs)}
-                        </td>
-                        <td className="px-3 py-2 text-right text-gray-600">
-                          {formatCurrency(metrics.totalCost)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium text-green-600">
-                          {formatCurrency(metrics.grossProfit)}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            metrics.margin >= 50 ? 'bg-green-100 text-green-700' :
-                            metrics.margin >= 30 ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {metrics.margin.toFixed(0)}%
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-500">
-                          {isEditing ? (
-                            <select
-                              value={plan.target}
-                              onChange={(e) => updatePlan(index, 'target', e.target.value)}
-                              className="px-2 py-1 border border-gray-300 rounded text-xs"
-                            >
-                              <option value="Akuisisi">Akuisisi</option>
-                              <option value="AOV utama">AOV utama</option>
-                              <option value="AOV + LTV">AOV + LTV</option>
-                              <option value="Heavy user / stok">Heavy user / stok</option>
-                            </select>
-                          ) : (
-                            plan.target
-                          )}
-                        </td>
-                        {isEditing && (
-                          <td className="px-3 py-2">
-                            <button
-                              onClick={() => {
-                                const updated = plans.filter((_, i) => i !== index);
-                                setPlans(updated);
-                              }}
-                              className="text-red-500 hover:text-red-700 text-xs"
-                            >
-                              Hapus
-                            </button>
+                  {plans.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-8 text-center text-gray-400">
+                        <Calculator size={32} className="mx-auto mb-2 opacity-50" />
+                        <p>Tidak ada pricing plan</p>
+                        <p className="text-xs mt-1">Klik "Generate with AI" atau tunggu content terisi</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    plans.map((plan, index) => {
+                      const metrics = calculateMetrics(plan);
+                      const isHighlighted = plan.name.includes('Rutin') || plan.name.includes('Hemat');
+                      
+                      return (
+                        <tr 
+                          key={index} 
+                          className={`border-t border-gray-100 ${isHighlighted ? 'bg-amber-50' : ''}`}
+                        >
+                          <td className="px-3 py-2 font-semibold text-gray-900">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={plan.name}
+                                onChange={(e) => updatePlan(index, 'name', e.target.value)}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                              />
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                {plan.name}
+                                {(plan.name.includes('AOV') || plan.name.includes('Hemat')) && (
+                                  <TrendingUp size={14} className="text-amber-600" />
+                                )}
+                              </span>
+                            )}
                           </td>
-                        )}
-                      </tr>
-                    );
-                  })}
+                          <td className="px-3 py-2 text-center">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="1"
+                                value={plan.quantity}
+                                onChange={(e) => updatePlan(index, 'quantity', parseInt(e.target.value) || 1)}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+                              />
+                            ) : (
+                              <span className="font-medium">{plan.quantity} pcs</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold text-gray-900">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={plan.sellingPrice}
+                                onChange={(e) => updatePlan(index, 'sellingPrice', parseInt(e.target.value) || 0)}
+                                className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right"
+                              />
+                            ) : (
+                              formatCurrency(plan.sellingPrice)
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600">
+                            {formatCurrency(metrics.pricePerPcs)}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600">
+                            {formatCurrency(metrics.totalCost)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium text-green-600">
+                            {formatCurrency(metrics.grossProfit)}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              metrics.margin >= 50 ? 'bg-green-100 text-green-700' :
+                              metrics.margin >= 30 ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {metrics.margin.toFixed(0)}%
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-500">
+                            {isEditing ? (
+                              <select
+                                value={plan.target}
+                                onChange={(e) => updatePlan(index, 'target', e.target.value)}
+                                className="px-2 py-1 border border-gray-300 rounded text-xs"
+                              >
+                                <option value="Akuisisi">Akuisisi</option>
+                                <option value="AOV utama">AOV utama</option>
+                                <option value="AOV + LTV">AOV + LTV</option>
+                                <option value="Heavy user / stok">Heavy user / stok</option>
+                              </select>
+                            ) : (
+                              plan.target
+                            )}
+                          </td>
+                          {isEditing && (
+                            <td className="px-3 py-2">
+                              <button
+                                onClick={() => {
+                                  const updated = plans.filter((_, i) => i !== index);
+                                  setPlans(updated);
+                                }}
+                                className="text-red-500 hover:text-red-700 text-xs"
+                              >
+                                Hapus
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -308,14 +593,14 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
                 <>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    disabled={plans.length === 0}
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Sparkles size={14} />
                     Edit Plans
                   </button>
                   <button
                     onClick={() => {
-                      setPlans(defaultPlans);
                       const updated = defaultPlans.map(plan => ({
                         ...plan,
                         sellingPrice: calculateSellingPrice(costPrice, plan.quantity, plan.target),
@@ -340,11 +625,6 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
                   <button
                     onClick={() => {
                       setIsEditing(false);
-                      const updated = defaultPlans.map(plan => ({
-                        ...plan,
-                        sellingPrice: calculateSellingPrice(costPrice, plan.quantity, plan.target),
-                      }));
-                      setPlans(updated);
                     }}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
@@ -364,7 +644,8 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
             
             <button
               onClick={copyTableToClipboard}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+              disabled={plans.length === 0}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
             >
               {copiedIndex === -1 ? <Check size={14} /> : <Copy size={14} />}
               {copiedIndex === -1 ? 'Tersalin!' : 'Copy Table'}
@@ -374,7 +655,7 @@ export default function PricingPlanGenerator({ costPrice, onSave }: PricingPlanG
           {/* Tips */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-xs text-blue-800">
-              <strong>💡 Tips LTV:</strong> Gunakan paket &quot;Hemat&quot; atau &quot;Rutin&quot; sebagai AOV utama untuk meningkatkan lifetime value pelanggan. 
+              <strong>💡 Tips LTV:</strong> Gunakan paket "Hemat" atau "Rutin" sebagai AOV utama untuk meningkatkan lifetime value pelanggan. 
               Semakin tinggi margin di awal (Trial), semakin besar toleransi untuk menawarkan paket yang lebih besar nanti.
             </p>
           </div>

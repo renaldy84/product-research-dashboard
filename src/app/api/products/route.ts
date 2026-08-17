@@ -18,10 +18,11 @@ export async function GET(request: NextRequest) {
       [userId]
     );
 
-    // Parse scores_json if exists
+    // Parse scores_json and pricing_plan if exists
     const parsedProducts = products.map((p) => ({
       ...p,
       scores: p.scores_json ? JSON.parse(p.scores_json) : null,
+      pricing_plan: p.pricing_plan ? JSON.parse(p.pricing_plan) : null,
     }));
 
     return NextResponse.json(parsedProducts);

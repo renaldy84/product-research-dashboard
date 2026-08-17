@@ -18,6 +18,14 @@ export interface Category {
   updated_at: string;
 }
 
+export interface PricingTier {
+  name: string;
+  icon: string;
+  quantity: number;
+  sellingPrice: number;
+  target: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -38,6 +46,7 @@ export interface Product {
   meta_ad_narrative: string | null;
   ig_reels_narrative: string | null;
   tiktok_narrative: string | null;
+  pricing_plan: PricingTier[] | null;
   scores: ProductScores | null;
   created_at: string;
   updated_at: string;

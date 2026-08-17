@@ -30,16 +30,35 @@ import {
   LightbulbIcon
 } from 'lucide-react';
 
-type GenerateType = 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle';
+type GenerateType = 'target_market' | 'problem_solved' | 'demand_indication' | 'competitors' | 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'all';
+
+// All types that will be generated when clicking "Generate All"
+const allGenerateTypes: GenerateType[] = [
+  'target_market',
+  'problem_solved',
+  'demand_indication',
+  'competitors',
+  'angle',
+  'opinion',
+  'pitchline',
+  'strategy',
+  'meta_ad',
+  'ig_reels',
+  'tiktok',
+];
 
 const generateConfig = [
-  { type: 'angle' as const, label: 'Angle Iklan', icon: LightbulbIcon, description: 'Suggest angle/hook untuk ads', color: 'bg-amber-100 text-amber-600' },
-  { type: 'opinion' as const, label: 'AI Opinion', icon: Sparkles, description: 'Analisis kelayakan & tantangan', color: 'bg-purple-100 text-purple-600' },
-  { type: 'pitchline' as const, label: 'Pitchline', icon: MessageSquare, description: 'Hook lines untuk ads', color: 'bg-blue-100 text-blue-600' },
-  { type: 'strategy' as const, label: 'Strategy', icon: TrendingUp, description: 'Rencana marketing lengkap', color: 'bg-green-100 text-green-600' },
-  { type: 'meta_ad' as const, label: 'Meta Ads', icon: Megaphone, description: 'Sample narrative untuk FB/IG ads', color: 'bg-indigo-100 text-indigo-600' },
-  { type: 'ig_reels' as const, label: 'IG Reels', icon: Video, description: 'Script untuk Reels', color: 'bg-pink-100 text-pink-600' },
-  { type: 'tiktok' as const, label: 'TikTok', icon: Share2, description: 'Script untuk TikTok video', color: 'bg-black text-white' },
+  { type: 'target_market' as const, label: 'Target Market', icon: Users, description: 'Analisis target market', color: 'bg-blue-100 text-blue-600', field: 'target_market' as const },
+  { type: 'problem_solved' as const, label: 'Masalah', icon: AlertTriangle, description: 'Masalah yang diselesaikan', color: 'bg-orange-100 text-orange-600', field: 'problem_solved' as const },
+  { type: 'demand_indication' as const, label: 'Demand', icon: TrendingUp, description: 'Indikasi demand pasar', color: 'bg-green-100 text-green-600', field: 'demand_indication' as const },
+  { type: 'competitors' as const, label: 'Kompetitor', icon: Users, description: 'Analisis kompetitor', color: 'bg-red-100 text-red-600', field: 'competitors' as const },
+  { type: 'angle' as const, label: 'Angle Iklan', icon: LightbulbIcon, description: 'Suggest angle/hook untuk ads', color: 'bg-amber-100 text-amber-600', field: 'potential_angles' as const },
+  { type: 'opinion' as const, label: 'AI Opinion', icon: Sparkles, description: 'Analisis kelayakan & tantangan', color: 'bg-purple-100 text-purple-600', field: 'ai_opinion' as const },
+  { type: 'pitchline' as const, label: 'Pitchline', icon: MessageSquare, description: 'Hook lines untuk ads', color: 'bg-blue-100 text-blue-600', field: 'pitchline' as const },
+  { type: 'strategy' as const, label: 'Strategy', icon: TrendingUp, description: 'Rencana marketing lengkap', color: 'bg-teal-100 text-teal-600', field: 'marketing_strategy' as const },
+  { type: 'meta_ad' as const, label: 'Meta Ads', icon: Megaphone, description: 'Sample narrative untuk FB/IG ads', color: 'bg-indigo-100 text-indigo-600', field: 'meta_ad_narrative' as const },
+  { type: 'ig_reels' as const, label: 'IG Reels', icon: Video, description: 'Script untuk Reels', color: 'bg-pink-100 text-pink-600', field: 'ig_reels_narrative' as const },
+  { type: 'tiktok' as const, label: 'TikTok', icon: Share2, description: 'Script untuk TikTok video', color: 'bg-black text-white', field: 'tiktok_narrative' as const },
 ];
 
 export default function ProductDetailPage() {
@@ -111,7 +130,11 @@ export default function ProductDetailPage() {
     setGeneratingTypes(prev => new Set(prev).add(type));
 
     try {
-      let fieldMap: Record<GenerateType, string> = {
+      const fieldMap: Record<string, string> = {
+        target_market: 'target_market',
+        problem_solved: 'problem_solved',
+        demand_indication: 'demand_indication',
+        competitors: 'competitors',
         angle: 'potential_angles',
         opinion: 'ai_opinion',
         pitchline: 'pitchline',
@@ -188,6 +211,144 @@ export default function ProductDetailPage() {
         next.delete(type);
         return next;
       });
+    }
+  };
+
+  // Generate all AI content at once with real-time widget updates
+  const handleGenerateAll = async () => {
+    if (!user || !product) return;
+
+    // Set all types as generating
+    setGeneratingTypes(new Set(allGenerateTypes as GenerateType[]));
+
+    const fieldMap: Record<string, string> = {
+      target_market: 'target_market',
+      problem_solved: 'problem_solved',
+      demand_indication: 'demand_indication',
+      competitors: 'competitors',
+      angle: 'potential_angles',
+      opinion: 'ai_opinion',
+      pitchline: 'pitchline',
+      strategy: 'marketing_strategy',
+      meta_ad: 'meta_ad_narrative',
+      ig_reels: 'ig_reels_narrative',
+      tiktok: 'tiktok_narrative',
+    };
+
+    const results: Record<string, string> = {};
+    let errorCount = 0;
+
+    try {
+      // Get available providers
+      const providersRes = await fetch('/api/ai/generate', {
+        method: 'GET',
+        headers: { 'x-user-id': user.id }
+      });
+      const providersData = await providersRes.json();
+      const activeProvider = providersData.providers?.find((p: any) => p.hasApiKey);
+
+      // Generate each type sequentially
+      for (let i = 0; i < allGenerateTypes.length; i++) {
+        const type = allGenerateTypes[i];
+        const config = generateConfig.find(c => c.type === type);
+        const label = config?.label || type;
+        
+        console.log(`[AI Generate ${i + 1}/${allGenerateTypes.length}] Starting: ${label}`);
+        
+        try {
+          const response = await fetch('/api/ai/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': user.id
+            },
+            body: JSON.stringify({
+              type,
+              provider: activeProvider?.id || 'openai',
+              model: activeProvider?.defaultModel,
+              product: {
+                name: product.name,
+                cost_price: product.cost_price,
+                selling_price: product.selling_price,
+                target_market: product.target_market || '',
+                problem_solved: product.problem_solved || '',
+                competitors: product.competitors || '',
+                potential_angles: product.potential_angles || '',
+              }
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to generate ${type}`);
+          }
+
+          const data = await response.json();
+          const field = fieldMap[type];
+          
+          if (field && data.result) {
+            results[type] = data.result;
+            
+            // Immediately update the store with this result
+            const updatedProduct = { ...product, [field]: data.result };
+            updateProduct(updatedProduct);
+          }
+          
+          console.log(`[AI Generate ${i + 1}/${allGenerateTypes.length}] ✓ Done: ${label}`);
+          
+          // Remove this type from generating set (widget is done)
+          setGeneratingTypes(prev => {
+            const next = new Set(prev);
+            next.delete(type);
+            return next;
+          });
+
+        } catch (error) {
+          console.error(`[AI Generate ${i + 1}/${allGenerateTypes.length}] ✗ Failed: ${label}`, error);
+          errorCount++;
+          // Still remove from generating set even if failed
+          setGeneratingTypes(prev => {
+            const next = new Set(prev);
+            next.delete(type);
+            return next;
+          });
+        }
+      }
+
+      // Final save to database with all results
+      if (Object.keys(results).length > 0) {
+        const updateData: any = { ...results };
+        for (const [type, content] of Object.entries(results)) {
+          const field = fieldMap[type];
+          if (field) {
+            updateData[field] = content;
+          }
+        }
+
+        // Recalculate scores
+        const category = categories.find(c => c.id === product.category_id);
+        const summary = calculateProductSummary({ ...product, ...updateData } as any, category, weights);
+        updateData.scores = summary.scores;
+
+        // Save to database
+        await fetch(`/api/products/${productId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': user.id
+          },
+          body: JSON.stringify(updateData),
+        });
+      }
+
+      // Show result notification
+      if (errorCount > 0) {
+        const successCount = allGenerateTypes.length - errorCount;
+        alert(`Generate selesai! ${successCount} berhasil, ${errorCount} gagal.`);
+      }
+
+    } catch (error) {
+      console.error('Failed to generate all content:', error);
+      alert('Gagal menghasilkan konten. Silakan coba lagi.');
     }
   };
 
@@ -300,10 +461,26 @@ export default function ProductDetailPage() {
 
       {/* Pricing Plan Generator */}
       <PricingPlanGenerator 
-        costPrice={product.cost_price} 
+        costPrice={product.cost_price}
+        productId={product.id}
+        existingPricingPlan={product.pricing_plan || undefined}
+        product={{
+          name: product.name,
+          cost_price: product.cost_price,
+          selling_price: product.selling_price,
+          target_market: product.target_market || '',
+          problem_solved: product.problem_solved || '',
+          demand_indication: product.demand_indication || '',
+          competitors: product.competitors || '',
+          potential_angles: product.potential_angles || '',
+          ai_opinion: product.ai_opinion || '',
+          pitchline: product.pitchline || '',
+          marketing_strategy: product.marketing_strategy || '',
+        }}
         onSave={(plans) => {
           console.log('Saved pricing plans:', plans);
-          // Optional: Save to product or show notification
+          // Update the product in store with new pricing plan
+          updateProduct({ ...product, pricing_plan: plans });
         }}
       />
 
@@ -364,70 +541,76 @@ export default function ProductDetailPage() {
           ))}
         </div>
       </div>
-
-      {/* Product Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Target className="text-blue-600" size={20} />
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 shadow-lg">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="text-white">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Sparkles size={24} />
+                Generate Semua Konten dengan AI
+              </h2>
+              <p className="text-indigo-100 mt-1 text-sm">
+                Target Market • Masalah • Demand • Kompetitor • Angle • Opinion • Pitchline • Strategy • Meta Ads • IG Reels • TikTok
+              </p>
             </div>
-            <h2 className="font-semibold text-gray-900">Target Market</h2>
+            <button
+              onClick={handleGenerateAll}
+              disabled={generatingTypes.size > 0}
+              className="flex items-center gap-2 px-6 py-3 bg-white text-indigo-600 rounded-xl font-bold hover:bg-indigo-50 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {generatingTypes.size > 0 ? (
+                <>
+                  <Loader2 size={20} className="animate-spin" />
+                  Generating... ({generatingTypes.size}/{allGenerateTypes.length})
+                </>
+              ) : (
+                <>
+                  <Sparkles size={20} />
+                  Generate with AI
+                </>
+              )}
+            </button>
           </div>
-          {product.target_market ? renderMarkdown(product.target_market) : <p className="text-gray-400 italic">Belum diisi</p>}
+          
+          {/* Progress indicator */}
+          {generatingTypes.size > 0 && (
+            <div className="mt-4">
+              <div className="flex flex-wrap gap-2">
+                {allGenerateTypes.map((type) => {
+                  const config = generateConfig.find(c => c.type === type);
+                  const isGenerating = generatingTypes.has(type);
+                  return (
+                    <div
+                      key={type}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+                        isGenerating
+                          ? 'bg-white/30 text-white animate-pulse'
+                          : 'bg-white/10 text-white/60'
+                      }`}
+                    >
+                      {isGenerating && <Loader2 size={12} className="animate-spin" />}
+                      {config?.label || type}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-orange-100 rounded-lg">
-              <AlertTriangle className="text-orange-600" size={20} />
-            </div>
-            <h2 className="font-semibold text-gray-900">Masalah yang Diselesaikan</h2>
-          </div>
-          {product.problem_solved ? renderMarkdown(product.problem_solved) : <p className="text-gray-400 italic">Belum diisi</p>}
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Users className="text-purple-600" size={20} />
-            </div>
-            <h2 className="font-semibold text-gray-900">Indikasi Demand</h2>
-          </div>
-          {product.demand_indication ? renderMarkdown(product.demand_indication) : <p className="text-gray-400 italic">Belum diisi</p>}
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <AlertTriangle className="text-red-600" size={20} />
-            </div>
-            <h2 className="font-semibold text-gray-900">Kompetitor</h2>
-          </div>
-          {product.competitors ? renderMarkdown(product.competitors) : <p className="text-gray-400 italic">Belum diisi</p>}
-        </div>
+        <p className="text-gray-600">Klik tombol di atas untuk generate semua konten, atau klik Generate pada masing-masing card di bawah untuk generate per bagian.</p>
 
       </div>
 
+     
+
       {/* AI Generated Content */}
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-gray-900">Konten yang Dihasilkan AI</h2>
-        <p className="text-gray-600">Gunakan tombol Generate untuk membuat konten marketing dengan bantuan AI</p>
-
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {generateConfig.map((item) => {
             const Icon = item.icon;
-            let content = '';
-            
-            switch (item.type) {
-              case 'angle': content = product.potential_angles || ''; break;
-              case 'opinion': content = product.ai_opinion || ''; break;
-              case 'pitchline': content = product.pitchline || ''; break;
-              case 'strategy': content = product.marketing_strategy || ''; break;
-              case 'meta_ad': content = product.meta_ad_narrative || ''; break;
-              case 'ig_reels': content = product.ig_reels_narrative || ''; break;
-              case 'tiktok': content = product.tiktok_narrative || ''; break;
-            }
+            // Use product[item.field] to get content dynamically
+            const content = (product as any)[item.field] || '';
 
             const hasContent = !!content;
             const isGeneratingThis = generatingTypes.has(item.type);

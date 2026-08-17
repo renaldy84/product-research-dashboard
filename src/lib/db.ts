@@ -29,6 +29,18 @@ function getDb(): Database.Database {
 function initTables(): void {
   const database = db!;
   
+  // Migration: Add pricing_plan column if not exists
+  try {
+    const result = database.prepare("PRAGMA table_info(products)").all() as any[];
+    const hasPricingPlan = result.some((col: any) => col.name === 'pricing_plan');
+    if (!hasPricingPlan) {
+      database.exec(`ALTER TABLE products ADD COLUMN pricing_plan TEXT`);
+      console.log('[DB] Added pricing_plan column to products table');
+    }
+  } catch (e) {
+    console.log('[DB] Migration check:', e);
+  }
+  
   database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -73,6 +85,7 @@ function initTables(): void {
       meta_ad_narrative TEXT,
       ig_reels_narrative TEXT,
       tiktok_narrative TEXT,
+      pricing_plan TEXT,
       scores_json TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,

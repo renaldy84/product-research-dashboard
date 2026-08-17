@@ -5,7 +5,7 @@ import { runQuery } from '@/lib/db';
 type AIProvider = 'openai' | 'openrouter' | 'sumopod';
 
 interface GenerateRequest {
-  type: 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'description' | 'target_market' | 'problem_solved' | 'competitors' | 'demand_indication';
+  type: 'opinion' | 'pitchline' | 'strategy' | 'meta_ad' | 'ig_reels' | 'tiktok' | 'angle' | 'description' | 'target_market' | 'problem_solved' | 'competitors' | 'demand_indication' | 'pricing';
   product: {
     name: string;
     description?: string;
@@ -15,6 +15,10 @@ interface GenerateRequest {
     problem_solved: string;
     competitors: string;
     potential_angles: string;
+    demand_indication?: string;
+    ai_opinion?: string;
+    pitchline?: string;
+    marketing_strategy?: string;
   };
 }
 
@@ -245,6 +249,8 @@ export async function POST(request: NextRequest) {
     const body: GenerateRequest = await request.json();
     const { type, product } = body;
 
+    console.log(`[AI Generate] Type: ${type}, Product: ${product?.name}`);
+
     // Get user settings
     const settings = await getUserSettings(userId);
     
@@ -258,6 +264,9 @@ export async function POST(request: NextRequest) {
     if (getApiKey('openrouter', settings)) availableProviders.push('openrouter');
     if (getApiKey('sumopod', settings)) availableProviders.push('sumopod');
     
+    console.log(`[AI Generate] Available providers: ${availableProviders.join(', ')}`);
+    console.log(`[AI Generate] Preferred provider: ${preferredProvider}`);
+    
     if (availableProviders.length === 0) {
       return NextResponse.json({ 
         error: 'No AI provider configured. Please add your API key in the Settings page.'
@@ -269,12 +278,16 @@ export async function POST(request: NextRequest) {
       ? preferredProvider 
       : availableProviders[0];
 
+    console.log(`[AI Generate] Using provider: ${activeProvider}`);
+
     // Get custom endpoint (baseUrl from user settings)
     const customEndpoint = getEndpoint(activeProvider, settings);
     const baseUrl = customEndpoint || providerDefaults[activeProvider].baseUrl;
     const apiKey = getApiKey(activeProvider, settings)!;
     const customModel = getCustomModel(activeProvider, settings);
     const modelToUse = activeModel || customModel || providerDefaults[activeProvider].defaultModel;
+
+    console.log(`[AI Generate] Model: ${modelToUse}, BaseUrl: ${baseUrl}`);
 
     const profit = product.selling_price - product.cost_price;
     const margin = product.selling_price > 0 
@@ -550,21 +563,128 @@ Untuk produk "${product.name}":
 Gunakan data spesifik dari web browsing. Format output dalam markdown.`;
 
         break;
+
+      case 'pricing':
+        prompt = `Buatkan STRATEGI PRICING PLAN untuk produk berikut:
+
+**PRODUK:**
+- Nama: ${product.name}
+- Harga Modal (Cost): ${formatCurrency(product.cost_price)}
+- Harga Jual Supplier (Rekomendasi): ${product.selling_price > 0 ? formatCurrency(product.selling_price) : 'Belum ada'}
+
+**TARGET MARKET:** ${product.target_market || 'Belum ada'}
+**DEMAND:** ${product.demand_indication || 'Belum ada'}
+**ANALISIS KOMPETITOR:** ${product.competitors || 'Belum ada'}
+**AI OPINION:** ${product.ai_opinion || 'Belum ada'}
+**MARKETING STRATEGY:** ${product.marketing_strategy || 'Belum ada'}
+
+BUAT 4 PRICING TIERS:
+
+1. **Trial (Akuisisi)**: Paket 1 pcs untuk menarik customer baru
+   - Purpose: reduce risk perception, encourage first purchase
+   - HARGA PSIKOLOGIS: Gunakan harga yang menarik untuk trial (contoh: 49.900, 59.900, 69.900, 79.900)
+   - Boleh lebih murah dari harga supplier tapi JANGAN terlalu jauh bedanya
+   
+2. **AOV Utama**: Paket 2-3 pcs untuk average order value
+   - Purpose: main revenue driver
+   - HARGA PSIKOLOGIS: Total harga harus menarik, gunakan .900 ending (contoh: 99.900, 149.900, 179.900)
+   - Harga per pcs harus LEBIH MURAH dari trial
+   
+3. **Loyalty/LTV**: Paket 3-5 pcs untuk repeat buyers
+   - Purpose: encourage stocking up, regular purchase
+   - HARGA PSIKOLOGIS: Gunakan harga bulat .000 yang solid (contoh: 199.000, 249.000, 299.000)
+   - Tunjukkan value proposition yang jelas
+   
+4. **Bulk/Stok**: Paket 5+ pcs untuk heavy users / resellers
+   - Purpose: maximum LTV, bulk orders
+   - HARGA PSIKOLOGIS: Harga premium yang still worth it (contoh: 399.000, 499.000, 599.000)
+   - Lowest per-unit price tapi still profitable
+
+ATURAN HARGA PSIKOLOGIS INDONESIA:
+1. Gunakan .900 atau .000 ending - JANGAN .500 atau .000 yang bulat
+2. Angka seperti 49.900, 79.900, 99.900, 149.900, 199.000 terasa "lebih murah"
+3. Jangan pakai harga bulat seperti 100.000, 150.000 - kurang psychological
+4. Price anchoring: trial price adalah "gateway" ke harga lebih tinggi
+
+NAMA PAKET: Harus RELEVAN dengan produk ini!
+- Susu → "Starter", "Bulanan", "Keluarga", "Stok" (BUKAN "Peternak")
+- Skincare → "Trial", "Basic", "Complete", "Pro"
+- Fashion → "Solo", "Couple", "Family", "Bulk"
+- Makanan → "Cobain", "Harian", "Mingguan", "Stok"
+
+RESPON DALAM FORMAT JSON (tanpa markdown):
+{
+  "plans": [
+    {"name": "[Nama paket trial yang RELEVAN]", "icon": "🎁", "quantity": 1, "sellingPrice": 49900, "target": "Akuisisi"},
+    {"name": "[Nama paket AOV yang RELEVAN]", "icon": "⭐", "quantity": 2, "sellingPrice": 99900, "target": "AOV utama"},
+    {"name": "[Nama paket loyalty yang RELEVAN]", "icon": "🔥", "quantity": 3, "sellingPrice": 199000, "target": "Loyalty / LTV"},
+    {"name": "[Nama paket bulk yang RELEVAN]", "icon": "🏆", "quantity": 5, "sellingPrice": 399000, "target": "Bulk / Stok"}
+  ]
+}
+
+PENTING: 
+- sellingPrice dalam angka bulat (tanpa koma)
+- JSON valid tanpa markdown code blocks
+- Harga必须是 .900 atau .000 ending
+- Nama paket harus RELEVAN dengan "${product.name}"`;
+        break;
     }
 
-    const result = await generateWithAI(activeProvider, modelToUse, baseUrl, apiKey, prompt);
+    // Try providers with fallback
+    let result: string | null = null;
+    let usedProvider = activeProvider;
+    let usedModel = modelToUse;
+    let usedBaseUrl = baseUrl;
+    let lastError: Error | null = null;
+
+    for (const provider of availableProviders) {
+      const pApiKey = getApiKey(provider, settings)!;
+      const pCustomModel = getCustomModel(provider, settings);
+      const pModel = activeModel || pCustomModel || providerDefaults[provider].defaultModel;
+      const pEndpoint = getEndpoint(provider, settings);
+      const pBaseUrl = pEndpoint || providerDefaults[provider].baseUrl;
+
+      console.log(`[AI Generate] Trying provider: ${provider}`);
+
+      try {
+        result = await generateWithAI(provider, pModel, pBaseUrl, pApiKey, prompt);
+        usedProvider = provider;
+        usedModel = pModel;
+        usedBaseUrl = pBaseUrl;
+        
+        // Check if result is an error message
+        if (result.includes('requires API key') || result.includes('No AI provider')) {
+          console.log(`[AI Generate] Provider ${provider} returned error, trying next...`);
+          continue;
+        }
+        
+        console.log(`[AI Generate] ✓ Success with provider: ${provider}`);
+        break;
+      } catch (error) {
+        console.error(`[AI Generate] ✗ Failed with provider ${provider}:`, error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    if (!result || result.includes('requires API key')) {
+      return NextResponse.json(
+        { error: `All AI providers failed. Last error: ${lastError?.message || 'Unknown error'}` },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ 
       result, 
-      provider: activeProvider, 
-      model: modelToUse,
-      endpoint: baseUrl,
+      provider: usedProvider, 
+      model: usedModel,
+      endpoint: usedBaseUrl,
     });
 
   } catch (error) {
-    console.error('AI generation error:', error);
+    console.error('[AI Generate] ✗ Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to generate content. Please check your API key and try again.' },
+      { error: `Failed to generate content: ${errorMessage}` },
       { status: 500 }
     );
   }
